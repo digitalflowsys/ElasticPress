@@ -73,30 +73,38 @@ class Widget extends WP_Widget {
 
 		$match_type = ( ! empty( $instance['match_type'] ) ) ? $instance['match_type'] : 'all';
 
-		/**
-		 * Get all the terms so we know if we should output the widget
-		 */
+		global $sitepress;
+		$df_term_options = [
+			'taxonomy'   => $taxonomy,
+			'hide_empty' => true,
+		];
+		if($sitepress){
+			$df_term_options['lang'] = 'sq';
+			$original_lang = ICL_LANGUAGE_CODE; // Save the current language
+			$new_lang = 'sq'; // The language in which you want to get the terms
+			$sitepress->switch_lang($new_lang); // Switch to new language
+		}
 		$terms = get_terms(
-			/**
-			 * Filter arguments passed to get_terms() while getting all possible terms for the facet widget.
-			 *
-			 * @since  3.5.0
-			 * @hook ep_facet_search_get_terms_args
-			 * @param  {array} $query Weighting query
-			 * @param  {string} $post_type Post type
-			 * @param  {array} $args WP Query arguments
-			 * @return  {array} New query
-			 */
-			apply_filters(
-				'ep_facet_search_get_terms_args',
-				[
-					'taxonomy'   => $taxonomy,
-					'hide_empty' => true,
-				],
-				$args,
-				$instance
-			)
+				/**
+				 * Filter arguments passed to get_terms() while getting all possible terms for the facet widget.
+				 *
+				 * @since  3.5.0
+				 * @hook ep_facet_search_get_terms_args
+				 * @param  {array} $query Weighting query
+				 * @param  {string} $post_type Post type
+				 * @param  {array} $args WP Query arguments
+				 * @return  {array} New query
+				 */
+				apply_filters(
+						'ep_facet_search_get_terms_args',
+						$df_term_options,
+						$args,
+						$instance
+				)
 		);
+		if($sitepress){
+			$sitepress->switch_lang($original_lang);
+		}
 
 		/**
 		 * Terms validity check
@@ -142,15 +150,25 @@ class Widget extends WP_Widget {
 
         $selected_terms = $selected_filters['taxonomies'][$taxonomy]['terms'] ?? [];
         $terms = array_filter($terms, fn ($t) => $t->count > 0  || count($selected_terms) > 0); ?>
-		<div class="terms" data-terms='<?php  echo esc_attr(wp_json_encode([
+		<div class="terms" data-terms='<?php
+			echo esc_attr(
+				wp_json_encode(
+						[
 							'title' => $instance['title'],
 							'taxonomy' => $taxonomy,
 							'selected_terms' => array_map(fn ($t) => (string) $t, array_keys($selected_terms)),
 							'terms' => array_map(
-								fn ($t) => ['slug' => (string) ($t->slug), 'name' => $t->name],
-								$this->order_by_selected($terms ?? [], $selected_terms,$order,$orderby)
+								fn ($t) => [
+												'slug' => (string) ($t->slug),
+												'name' => ($sitepress === null || $original_lang == 'sq') ?
+																	$t->name :
+																	get_term_by('id', icl_object_id($t->term_id, $taxonomy, false, $original_lang) ?? $t->term_id, $taxonomy)->name
+											],
+								$this->order_by_selected($terms ?? [], $selected_terms, $order, $orderby)
 							)
-						])); ?>'>
+						]
+					)
+			); ?>'>
 		</div>
 	<?php
 		echo wp_kses_post( $args['after_widget'] );

@@ -93,7 +93,7 @@ class FacetType extends \ElasticPress\Feature\Facets\FacetType {
 		 * @param   {string} Facet filter name
 		 * @return  {string} New facet filter name
 		 */
-		return apply_filters( 'ep_facet_filter_name', 'ep_filter_' );
+		return apply_filters( 'ep_facet_filter_name', 'filter_' );
 	}
 
 	/**

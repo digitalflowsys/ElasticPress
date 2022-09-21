@@ -1,4 +1,8 @@
 /* eslint-disable camelcase, no-underscore-dangle, no-use-before-define */
+
+/**
+ * Internal dependencies.
+ */
 import {
 	findAncestorByClass,
 	escapeDoubleQuotes,
@@ -6,9 +10,6 @@ import {
 	debounce,
 	domReady,
 } from './utils/helpers';
-import 'element-closest';
-import 'promise-polyfill/src/polyfill';
-import 'whatwg-fetch';
 
 const { epas } = window;
 
@@ -186,7 +187,8 @@ async function esSearch(query, searchTerm) {
 	}
 
 	try {
-		const response = await window.fetch(epas.endpointUrl, fetchConfig);
+		const response = await fetch(epas.endpointUrl, fetchConfig);
+
 		if (!response.ok) {
 			throw Error(response.statusText);
 		}
@@ -271,6 +273,10 @@ function updateAutosuggestBox(options, input) {
 		}
 
 		itemString += itemHTML;
+	}
+
+	if (typeof window.epAutosuggestListItemsHTMLFilter !== 'undefined') {
+		itemString = window.epAutosuggestListItemsHTMLFilter(itemString, options, input);
 	}
 
 	// append list items to the list
@@ -478,7 +484,7 @@ function init() {
 				}
 				break;
 			case 13: // Enter
-				if (results[currentIndex].classList.contains('selected')) {
+				if (results[currentIndex]?.classList.contains('selected')) {
 					// navigate to the item defined in the span's data-url attribute
 					selectItem(input, results[currentIndex].querySelector('.autosuggest-link'));
 				}
@@ -558,6 +564,13 @@ function init() {
 				}
 
 				query = JSON.stringify(query);
+			}
+
+			// Allow filtering the search query based on the input.
+			if (typeof window.epAutosuggestQueryFilter !== 'undefined') {
+				query = JSON.stringify(
+					window.epAutosuggestQueryFilter(JSON.parse(query), searchText, input),
+				);
 			}
 
 			// fetch the results
@@ -646,7 +659,11 @@ function init() {
 			autosuggestElement.appendChild(autosuggestList);
 		}
 
-		const clonedElement = autosuggestElement.cloneNode(true);
+		let clonedElement = autosuggestElement.cloneNode(true);
+
+		if (typeof window.epAutosuggestElementFilter !== 'undefined') {
+			clonedElement = window.epAutosuggestElementFilter(clonedElement, element);
+		}
 
 		element.insertAdjacentElement('afterend', clonedElement);
 	};
@@ -659,9 +676,10 @@ function init() {
 	 */
 	const prepareInputForAutosuggest = (input) => {
 		/**
-		 * Skip facet widget search fields.
+		 * Skip facet widget search fields and instant results.
 		 */
-		if (input.classList.contains('facet-search')) {
+		const ignoredClasses = ['facet-search', 'ep-search-input'];
+		if (ignoredClasses.some((className) => input.classList.contains(className))) {
 			return;
 		}
 

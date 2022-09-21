@@ -56,6 +56,7 @@ class ProtectedContent extends Feature {
 		add_filter( 'ep_post_sync_args', [ $this, 'include_post_password' ], 10, 2 );
 		add_filter( 'ep_post_sync_args', [ $this, 'remove_fields_from_password_protected' ], 11, 2 );
 		add_filter( 'ep_search_post_return_args', [ $this, 'return_post_password' ] );
+		add_filter( 'ep_skip_autosave_sync', '__return_false' );
 
 		if ( is_admin() ) {
 			add_filter( 'ep_admin_wp_query_integration', '__return_true' );
@@ -247,11 +248,13 @@ class ProtectedContent extends Feature {
 		 * Filter to skip the password protected content clean up.
 		 *
 		 * @hook ep_pc_skip_post_content_cleanup
-		 * @since 4.0.0
-		 * @param  {bool} $skip Whether the password protected content should have their content, and meta removed.
+		 * @since 4.0.0, 4.2.0 added $post_args and $post_id
+		 * @param  {bool}  $skip      Whether the password protected content should have their content, and meta removed
+		 * @param  {array} $post_args Post arguments
+		 * @param  {int}   $post_id   Post ID
 		 * @return {bool}
 		 */
-		if ( apply_filters( 'ep_pc_skip_post_content_cleanup', false ) ) {
+		if ( apply_filters( 'ep_pc_skip_post_content_cleanup', false, $post_args, $post_id ) ) {
 			return $post_args;
 		}
 
@@ -296,7 +299,7 @@ class ProtectedContent extends Feature {
 			 * @param  {bool} $exclude Exclude post from search.
 			 * @return {bool}
 			 */
-			if ( ! is_user_logged_in() || apply_filters( 'ep_exclude_password_protected_from_search', false ) ) {
+			if ( ( ! is_user_logged_in() && ! empty( $args['s'] ) ) || apply_filters( 'ep_exclude_password_protected_from_search', false ) ) {
 				$formatted_args['post_filter']['bool']['must_not'][] = array(
 					'exists' => array(
 						'field' => 'post_password',

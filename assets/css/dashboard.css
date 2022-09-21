@@ -39,14 +39,6 @@ html.wp-toolbar {
 	margin: 0.5em 0 0.75em;
 }
 
-#wpbody #update-nag,
-#wpbody .update-nag {
-	margin-bottom: 20px;
-	margin-left: -20px;
-	margin-top: 0;
-	width: 100%;
-}
-
 h2.ep-list-features {
 	display: none;
 }
@@ -54,6 +46,12 @@ h2.ep-list-features {
 /**
  * Header
  */
+
+#wpbody #update-nag,
+#wpbody .update-nag {
+	display: block;
+	margin: 5px 15px 2px;
+}
 
 .ep-header-menu {
 	background-color: #fff;
@@ -80,8 +78,8 @@ h2.ep-list-features {
 .ep-header-menu .icons {
 	display: inline-block;
 	float: right;
-	height: 39px;
-	line-height: 39px;
+	height: 30px;
+	line-height: 34px;
 	padding-right: 3px;
 }
 
@@ -132,6 +130,10 @@ h2.ep-list-features {
 .ep-header-menu .icons .dashicons-update,
 .ep-header-menu .icons .dashicons-admin-generic {
 	display: inline;
+}
+
+.ep-header-menu .icons .dashicons-update {
+	top: 2px;
 }
 
 /**
@@ -324,6 +326,11 @@ h2.ep-list-features {
 
 	&.requirements-status-notice--reindex {
 		border-color: var(--statusWarning);
+		display: none; /* Controlled by JavaScript. */
+	}
+
+	&.requirements-status-notice--syncing {
+		border-color: var(--statusError);
 		display: none; /* Controlled by JavaScript. */
 	}
 }

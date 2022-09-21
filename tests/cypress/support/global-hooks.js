@@ -1,43 +1,34 @@
 window.indexNames = null;
-
-let setFeatures = false;
+window.isEpIo = false;
 
 before(() => {
-	// Clear sync from previous tests.
-	cy.wpCli(
-		'wp eval \'delete_transient( "ep_wpcli_sync" ); delete_option( "ep_index_meta" ); delete_site_transient( "ep_wpcli_sync" ); delete_site_option( "ep_index_meta" );\'',
-	);
+	cy.wpCliEval(
+		`
+		// Clear any stuck sync process.
+		\\ElasticPress\\IndexHelper::factory()->clear_index_meta();
 
-	if (!window.indexNames) {
-		cy.wpCli('wp elasticpress get-indexes').then((wpCliResponse) => {
-			window.indexNames = JSON.parse(wpCliResponse.stdout);
-		});
-	}
+		$features = json_decode( '${JSON.stringify(cy.elasticPress.defaultFeatures)}', true );
+		
+		if ( ! \\ElasticPress\\Utils\\is_epio() ) {
+			$host            = \\ElasticPress\\Utils\\get_host();
+			$host            = str_replace( '172.17.0.1', 'localhost', $host );
+			$index_name      = \\ElasticPress\\Indexables::factory()->get( 'post' )->get_index_name();
+			$as_endpoint_url = $host . $index_name . '/_search';
+			
+			$features['autosuggest']['endpoint_url'] = $as_endpoint_url;
+		}
 
-	if (!setFeatures) {
-		cy.wpCliEval(
-			`if ( \\ElasticPress\\Utils\\is_epio() ) {
-				exit;
-			}
-			$host       = \\ElasticPress\\Utils\\get_host();
-			$host       = str_replace( '172.17.0.1', 'localhost', $host );
-			$index_name = \\ElasticPress\\Indexables::factory()->get( 'post' )->get_index_name();
-			echo $host . $index_name . '/_search';
-			`,
-		).then((searchEndpointUrl) => {
-			if (searchEndpointUrl.stdout === '') {
-				cy.updateFeatures();
-			} else {
-				cy.updateFeatures({
-					autosuggest: {
-						active: 1,
-						endpoint_url: searchEndpointUrl.stdout,
-					},
-				});
-			}
-		});
-		setFeatures = true;
-	}
+		update_option( 'ep_feature_settings', $features );
+
+		WP_CLI::runcommand('elasticpress get-indexes');
+		`,
+	).then((wpCliResponse) => {
+		window.indexNames = JSON.parse(wpCliResponse.stdout);
+	});
+
+	cy.wpCli('eval "echo (int) \\ElasticPress\\Utils\\is_epio();"').then((response) => {
+		window.isEpIo = response.stdout === '1';
+	});
 });
 
 afterEach(() => {

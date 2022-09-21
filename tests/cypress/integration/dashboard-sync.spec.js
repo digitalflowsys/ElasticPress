@@ -18,10 +18,10 @@ describe('Dashboard Sync', () => {
 	}
 
 	function resumeAndWait() {
-		cy.get('.ep-delete-data-and-sync .resume-sync').click();
-		cy.get('.ep-delete-data-and-sync .ep-sync-box__progress-info', {
+		cy.get('.ep-sync-button--resume').click();
+		cy.get('.ep-sync-progress strong', {
 			timeout: Cypress.config('elasticPressIndexTimeout'),
-		}).should('contain.text', 'Sync completed');
+		}).should('contain.text', 'Sync complete');
 	}
 
 	before(() => {
@@ -35,12 +35,55 @@ describe('Dashboard Sync', () => {
 		}
 	});
 
+	it('Should only display a single sync option for the initial sync', () => {
+		/**
+		 * Reset settings and skip install.
+		 */
+		cy.wpCli('elasticpress settings-reset --yes');
+		cy.visitAdminPage('admin.php?page=elasticpress');
+		cy.get('.setup-message a').contains('Skip Install').click();
+
+		/**
+		 * If a sync has not been performed the sync page should only show a
+		 * single sync panel.
+		 */
+		cy.visitAdminPage('admin.php?page=elasticpress-sync');
+		cy.get('.ep-sync-panel')
+			.should('have.length', 1)
+			.as('syncPanel')
+			.should('contain.text', 'Run a sync to index your existing content');
+
+		/**
+		 * Perform an initial sync.
+		 */
+		cy.get('@syncPanel').find('.ep-sync-button').click();
+
+		/**
+		 * The sync log should indicate that the sync completed and that
+		 * mapping was sent.
+		 */
+		cy.get('@syncPanel').find('.components-form-toggle').click();
+		cy.get('@syncPanel')
+			.find('.ep-sync-messages', { timeout: Cypress.config('elasticPressIndexTimeout') })
+			.should('contain.text', 'Mapping sent')
+			.should('contain.text', 'Sync complete');
+
+		/**
+		 * After the initial sync is complete there should be 2 sync panels
+		 * and the second should contain the delete & sync option.
+		 */
+		cy.get('.ep-sync-panel')
+			.should('have.length', 2)
+			.last()
+			.should('contain.text', 'If you are still having issues with your search results');
+	});
+
 	it('Can index content and see indexes names in the Health Screen', () => {
 		cy.visitAdminPage('admin.php?page=elasticpress-sync');
-		cy.get('.ep-delete-data-and-sync__button-delete').click();
-		cy.get('.ep-delete-data-and-sync .ep-sync-box__progress-info', {
+		cy.get('.ep-sync-button--delete').click();
+		cy.get('.ep-sync-progress strong', {
 			timeout: Cypress.config('elasticPressIndexTimeout'),
-		}).should('contain.text', 'Sync completed');
+		}).should('contain.text', 'Sync complete');
 
 		canSeeIndexesNames();
 	});
@@ -55,10 +98,10 @@ describe('Dashboard Sync', () => {
 		);
 
 		cy.visitAdminPage('admin.php?page=elasticpress-sync');
-		cy.get('.ep-delete-data-and-sync__button-delete').click();
-		cy.get('.ep-delete-data-and-sync .ep-sync-box__progress-info', {
+		cy.get('.ep-sync-button--delete').click();
+		cy.get('.ep-sync-progress strong', {
 			timeout: Cypress.config('elasticPressIndexTimeout'),
-		}).should('contain.text', 'Sync completed');
+		}).should('contain.text', 'Sync complete');
 
 		cy.visitAdminPage('admin.php?page=elasticpress-health');
 		cy.get('.wrap').should(
@@ -76,7 +119,7 @@ describe('Dashboard Sync', () => {
 
 		// Sync and remove, so EP doesn't think it is a fresh install.
 		cy.wpCli('wp elasticpress index --setup --yes');
-		cy.wpCli('wp elasticpress delete-index --yes');
+		cy.wpCli('wp elasticpress delete-index --yes --network-wide');
 
 		cy.visitAdminPage('network/admin.php?page=elasticpress-health');
 		cy.get('.wrap').should(
@@ -85,10 +128,10 @@ describe('Dashboard Sync', () => {
 		);
 
 		cy.visitAdminPage('network/admin.php?page=elasticpress-sync');
-		cy.get('.ep-delete-data-and-sync__button-delete').click();
-		cy.get('.ep-delete-data-and-sync .ep-sync-box__progress-info', {
+		cy.get('.ep-sync-button--delete').click();
+		cy.get('.ep-sync-progress strong', {
 			timeout: Cypress.config('elasticPressIndexTimeout'),
-		}).should('contain.text', 'Sync completed');
+		}).should('contain.text', 'Sync complete');
 
 		cy.visitAdminPage('network/admin.php?page=elasticpress-health');
 		cy.get('.wrap').should(
@@ -120,17 +163,15 @@ describe('Dashboard Sync', () => {
 		cy.visitAdminPage('admin.php?page=elasticpress-sync');
 
 		cy.intercept('POST', '/wp-admin/admin-ajax.php*').as('ajaxRequest');
-		cy.get('.ep-delete-data-and-sync__button-delete').click();
+		cy.get('.ep-sync-button--delete').click();
 		cy.wait('@ajaxRequest').its('response.statusCode').should('eq', 200);
-		cy.get('.ep-delete-data-and-sync .pause-sync').should('be.visible');
+		cy.get('.ep-sync-button--pause').should('be.visible');
 
 		cy.visitAdminPage('index.php');
 
 		cy.visitAdminPage('admin.php?page=elasticpress-sync');
-		cy.get('.ep-delete-data-and-sync .ep-sync-box__progress-info').should(
-			'contain.text',
-			'Sync in progress',
-		);
+		cy.get('.ep-sync-button--resume').should('be.visible');
+		cy.get('.ep-sync-progress strong').should('contain.text', 'Sync paused');
 
 		resumeAndWait();
 
@@ -144,7 +185,7 @@ describe('Dashboard Sync', () => {
 
 		cy.visitAdminPage('admin.php?page=elasticpress-sync');
 		cy.intercept('POST', '/wp-admin/admin-ajax.php*').as('ajaxRequest');
-		cy.get('.ep-delete-data-and-sync__button-delete').click();
+		cy.get('.ep-sync-button--delete').click();
 		cy.wait('@ajaxRequest').its('response.statusCode').should('eq', 200);
 
 		cy.visitAdminPage('admin.php?page=elasticpress');
@@ -164,12 +205,11 @@ describe('Dashboard Sync', () => {
 
 		cy.visitAdminPage('admin.php?page=elasticpress-sync');
 		cy.intercept('POST', '/wp-admin/admin-ajax.php*').as('ajaxRequest');
-		cy.get('.ep-delete-data-and-sync__button-delete').click();
+		cy.get('.ep-sync-button--delete').click();
 		cy.wait('@ajaxRequest').its('response.statusCode').should('eq', 200);
 
-		cy.get('.ep-delete-data-and-sync .pause-sync').should('be.visible');
-		cy.get('.ep-delete-data-and-sync .pause-sync').click();
-		cy.wait('@ajaxRequest').its('response.statusCode').should('eq', 200);
+		cy.get('.ep-sync-button--pause').should('be.visible');
+		cy.get('.ep-sync-button--pause').click();
 
 		cy.wpCli('wp elasticpress index', true)
 			.its('stderr')

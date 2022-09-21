@@ -55,6 +55,15 @@ abstract class Indexable {
 	public $query_integration;
 
 	/**
+	 * Flag to indicate if the indexable has support for
+	 * `id_range` pagination method during a sync.
+	 *
+	 * @var boolean
+	 * @since 4.1.0
+	 */
+	public $support_indexing_advanced_pagination = false;
+
+	/**
 	 * Get number of bulk items to index per page
 	 *
 	 * @since  3.0
@@ -714,10 +723,24 @@ abstract class Indexable {
 		if ( $new_date ) {
 			$timestamp = $new_date->getTimestamp();
 
+			/**
+			 * Filter the maximum year limit for date conversion.
+			 *
+			 * Use default date if year is greater than max limit. EP has limitation that doesn't allow to have year greater than 2099.
+			 *
+			 * @see https://github.com/10up/ElasticPress/issues/2769
+			 *
+			 * @hook ep_max_year_limit
+			 * @param  {int} $year Maximum year limit.
+			 * @return {int} Maximum year limit.
+			 * @since  4.2.1
+			 */
+			$max_year = apply_filters( 'ep_max_year_limit', 2099 );
+
 			// PHP allows DateTime to build dates with the non-existing year 0000, and this causes
 			// issues when integrating into stricter systems. This is by design:
 			// https://bugs.php.net/bug.php?id=60288
-			if ( false !== $timestamp && '0000' !== $new_date->format( 'Y' ) ) {
+			if ( false !== $timestamp && '0000' !== $new_date->format( 'Y' ) && $new_date->format( 'Y' ) <= $max_year ) {
 				$meta_types['date']     = $new_date->format( 'Y-m-d' );
 				$meta_types['datetime'] = $new_date->format( 'Y-m-d H:i:s' );
 				$meta_types['time']     = $new_date->format( 'H:i:s' );
@@ -756,6 +779,30 @@ abstract class Indexable {
 
 		foreach ( $meta_queries as $single_meta_query ) {
 
+			/**
+			 * There is a strange case where meta_query looks like this:
+			 * array(
+			 *  "something" => array(
+			 *   array(
+			 *      'key' => ...
+			 *      ...
+			 *   )
+			 *  )
+			 * )
+			 *
+			 * Somehow WordPress (WooCommerce) handles that case so we need to as well.
+			 *
+			 * @since  2.1
+			 */
+			if ( is_array( $single_meta_query ) && empty( $single_meta_query['key'] ) ) {
+				reset( $single_meta_query );
+				$first_key = key( $single_meta_query );
+
+				if ( is_array( $single_meta_query[ $first_key ] ) ) {
+					$single_meta_query = $single_meta_query[ $first_key ];
+				}
+			}
+
 			if ( ! empty( $single_meta_query['key'] ) ) {
 
 				$terms_obj = false;
@@ -763,6 +810,8 @@ abstract class Indexable {
 				$compare = '=';
 				if ( ! empty( $single_meta_query['compare'] ) ) {
 					$compare = strtolower( $single_meta_query['compare'] );
+				} elseif ( ! isset( $single_meta_query['value'] ) ) {
+					$compare = 'exists';
 				}
 
 				$type = null;
@@ -989,7 +1038,7 @@ abstract class Indexable {
 				if ( false !== $terms_obj ) {
 					$meta_filter[] = $terms_obj;
 				}
-			} elseif ( is_array( $single_meta_query ) && isset( $single_meta_query[0] ) && is_array( $single_meta_query[0] ) ) {
+			} elseif ( is_array( $single_meta_query ) ) {
 				/**
 				 * Handle multidimensional array. Something like:
 				 *
@@ -1083,11 +1132,15 @@ abstract class Indexable {
 	}
 
 	/**
-	 * Must implement a method that handles sending mapping to ES
+	 * Send mapping to Elasticsearch
 	 *
 	 * @return boolean
 	 */
-	abstract public function put_mapping();
+	public function put_mapping() {
+		$mapping = $this->generate_mapping();
+
+		return Elasticsearch::factory()->put_mapping( $this->get_index_name(), $mapping );
+	}
 
 	/**
 	 * Must implement a method that given an object ID, returns a formatted Elasticsearch
@@ -1107,4 +1160,115 @@ abstract class Indexable {
 	 * @return boolean
 	 */
 	abstract public function query_db( $args );
+
+	/**
+	 * Shim function for backwards-compatibility on custom Indexables.
+	 *
+	 * @since 4.1.0
+	 * @return array
+	 */
+	public function generate_mapping() {
+		_doing_it_wrong( __METHOD__, 'The Indexable class should not call generate_mapping() directly.', 'ElasticPress 4.0' );
+
+		return [];
+	}
+
+	/**
+	 * Get the search algorithm that should be used.
+	 *
+	 * @since 4.3.0
+	 * @param string $search_text   Search term(s)
+	 * @param array  $search_fields Search fields
+	 * @param array  $query_vars    Query vars
+	 * @return SearchAlgorithm Instance of search algorithm to be used
+	 */
+	public function get_search_algorithm( string $search_text, array $search_fields, array $query_vars ) : \ElasticPress\SearchAlgorithm {
+		/**
+		 * Filter the search algorithm to be used
+		 *
+		 * @hook ep_{$indexable_slug}_search_algorithm
+		 * @since  4.3.0
+		 * @param  {string} $search_algorithm Slug of the search algorithm used as fallback
+		 * @param  {string} $search_term      Search term
+		 * @param  {array}  $search_fields    Fields to be searched
+		 * @param  {array}  $query_vars       Query variables
+		 * @return {string} New search algorithm slug
+		 */
+		$search_algorithm = apply_filters( "ep_{$this->slug}_search_algorithm", 'basic', $search_text, $search_fields, $query_vars );
+
+		return \ElasticPress\SearchAlgorithms::factory()->get( $search_algorithm );
+	}
+
+	/**
+	 * Get all distinct meta field keys.
+	 *
+	 * @since 4.3.0
+	 * @param null|int $blog_id (Optional) The blog ID. Sending `null` will use the current blog ID.
+	 * @return array
+	 */
+	public function get_distinct_meta_field_keys( $blog_id = null ) {
+		$mapping = $this->get_mapping();
+
+		try {
+			if ( version_compare( Elasticsearch::factory()->get_elasticsearch_version(), '7.0', '<' ) ) {
+				$meta_fields = $mapping[ $this->get_index_name( $blog_id ) ]['mappings']['post']['properties']['meta']['properties'];
+			} else {
+				$meta_fields = $mapping[ $this->get_index_name( $blog_id ) ]['mappings']['properties']['meta']['properties'];
+			}
+			$meta_keys = array_values( array_keys( $meta_fields ) );
+			sort( $meta_keys );
+		} catch ( \Throwable $th ) {
+			return new \Exception( 'Meta fields not available.', 0 );
+		}
+
+		return $meta_keys;
+	}
+
+	/**
+	 * Get all distinct values for a given field.
+	 *
+	 * @since 4.3.0
+	 * @param string $field   Field full name. For example: `meta.name.raw`
+	 * @param int    $count   (Optional) Max number of different distinct values to be returned
+	 * @param int    $blog_id (Optional) The blog ID. Sending `null` will use the current blog ID.
+	 * @return array
+	 */
+	public function get_all_distinct_values( $field, $count = 10000, $blog_id = null ) {
+		$aggregation_name = 'distinct_values';
+
+		$es_query = [
+			'_source' => false,
+			'size'    => 0,
+			'aggs'    => [
+				$aggregation_name => [
+					'terms' => [
+						/**
+						 * Filter the max. number of different distinct values to be returned by Elasticsearch.
+						 *
+						 * @since 4.3.0
+						 * @hook ep_{$indexable_slug}_all_distinct_values
+						 * @param {int}    $size  The number of different values. Default: 10000
+						 * @param {string} $field The meta field
+						 * @return {string} The new number of different values
+						 */
+						'size'  => apply_filters( 'ep_' . $this->slug . '_all_distinct_values', $count, $field ),
+						'field' => $field,
+					],
+				],
+			],
+		];
+
+		$response = Elasticsearch::factory()->query( $this->get_index_name( $blog_id ), $this->slug, $es_query, [] );
+
+		if ( ! $response || empty( $response['aggregations'] ) || empty( $response['aggregations'][ $aggregation_name ] ) || empty( $response['aggregations'][ $aggregation_name ]['buckets'] ) ) {
+			return [];
+		}
+
+		$values = [];
+		foreach ( $response['aggregations'][ $aggregation_name ]['buckets'] as $es_bucket ) {
+			$values[] = $es_bucket['key'];
+		}
+
+		return $values;
+	}
 }
